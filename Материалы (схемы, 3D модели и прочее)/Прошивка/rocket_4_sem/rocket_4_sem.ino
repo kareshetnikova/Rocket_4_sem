@@ -5,7 +5,12 @@
 #include <Adafruit_BMP085.h>
 #include <SPI.h>
 #include <SD.h>
+#include "math.h"
 
+
+float g = 9.8155;
+float R = 8.3145;
+float mu = 0.002898;
 
 static const int PIN_CHIP_SELECT = 17;
 static const int GPSrx = 9, GPStx = 8, GSMrx = 1, GSMtx = 0;
@@ -25,22 +30,32 @@ bool flagGSM = 1; // флаг для отправки сообщений о ко
 bool FlagGreenLed;
 bool FlagRedLed;
 bool flagLastSMS = 1;
+bool flagHmax = false;
+bool flagSentHmax = false;
+bool flagMillis = true;
 
 char sms[300];
 char sd[300];
+char maxHsms[50];
 int decLat;
 int intLat;
 int intLng;
 int decLng;
 int decT;
 int intT;
+int P0, p, p1, p2, p3;
+float T1, T2, T3;
+int intHmax, decHmax;
+int timerP1, timerP2, timerP3;
+
+
 
 // Настройки работы БК
 int CntSMS = 0;
 int TotalNumberSMS = 5;
 int timerSendCoord;
-int PeriodSMS = 3000;
-int timeWorkBK = 20000;
+int PeriodSMS = 1000;
+int timeWorkBK = 40000;
 int PeriodWriteSD = 100;
 int PeriodBuzzer = 1000;
 int frequencyBuzzer = 1500;
@@ -107,7 +122,7 @@ void setup() {
   responseTextMode = sendATCommand("AT+CMGF=1;&W", true); // Включаем текстовый режима SMS (Text mode) и сразу сохраняем значение (AT&W)!
   responseTextMode.trim();
 
-  // sendSMS("+79646360100", "GSM is connected");
+   sendSMS("+79646360100", "GSM is connected");
 
   /*
   // Если GSM отвечает, мигаем в течение 5 с зеленым светодиодом раз в 500мс. Иначе красным и зеленым
@@ -287,25 +302,37 @@ digitalWrite(GREEN_LED_PIN, false);
       FlagGreenLed = !FlagGreenLed;
     }
   }    
-  
 
+   //начальное давлние
+   P0 = bmp.readPressure();
 
   TimeStartGPS = millis();
   timeDisplayInfo = millis();
   TimeGSM = millis();
   timeSD = millis();
-  timeStopSD = millis();
   timerSendCoord =  millis();
   timeSendLastCoord =  millis();
   timerBuzzer = millis();
+  timerP1 = millis();
+  timerP2 = millis();
+  timerP3 = millis();
 
   digitalWrite(RED_LED_PIN, false);
   digitalWrite(GREEN_LED_PIN, false);
+
+ 
 
 }
 
 
 void loop() {
+
+  if (flagMillis == 1)
+  {
+    timeStopSD = millis();
+    flagMillis = 0;
+    
+  }
 
 while(ss.available() > 0)
   gps.encode(ss.read());
@@ -345,10 +372,22 @@ while(ss.available() > 0)
     //отправляем смс   
     if (gps.location.isValid() && gps.time.isValid())
     {
-      splitFloat(gps.location.lat(), 6, intLat, decLat);
-      splitFloat(gps.location.lng(), 6, intLng, decLng);
-      sprintf(sms, "lat = %d.%d lng = %d.%d time = %d:%d:%d.%d", intLat, decLat, intLng, decLng, gps.time.hour(), gps.time.minute(), gps.time.second(), gps.time.centisecond());
-      sendSMS("+79646360100", sms);
+      if (flagHmax == true && flagSentHmax == false)
+      {
+        splitFloat(gps.location.lat(), 6, intLat, decLat);
+        splitFloat(gps.location.lng(), 6, intLng, decLng);
+        sprintf(sms, "lat = %d.%d lng = %d.%d time = %d:%d:%d.%d Hmax = %d.%d m", intLat, decLat, intLng, decLng, gps.time.hour(), gps.time.minute(), 
+        gps.time.second(), gps.time.centisecond(), intHmax, decHmax);
+        sendSMS("+79646360100", sms);
+        flagSentHmax = true;
+      }
+      else
+      {
+        splitFloat(gps.location.lat(), 6, intLat, decLat);
+        splitFloat(gps.location.lng(), 6, intLng, decLng);
+        sprintf(sms, "lat = %d.%d lng = %d.%d time = %d:%d:%d.%d", intLat, decLat, intLng, decLng, gps.time.hour(), gps.time.minute(), gps.time.second(), gps.time.centisecond());
+        sendSMS("+79646360100", sms);
+      }
     }
     else
     {
@@ -358,7 +397,7 @@ while(ss.available() > 0)
     CntSMS = CntSMS + 1;
     timerSendCoord = millis();
   }
-
+*/
 
   //Отправляем одну смс, чтоб нашли борткомп
   if (millis() - timeSendLastCoord >= 40000 && flagLastSMS == 1)
@@ -378,7 +417,7 @@ while(ss.available() > 0)
 
     flagLastSMS = 0;
   }
-*/
+
 
 // ПИЩАЛКА
 
@@ -388,8 +427,53 @@ if (millis() - timeSendLastCoord >= 40000 && millis() - timerBuzzer >=  PeriodBu
    timerBuzzer = millis();
 }
 
-  // ОТПРАВКА СМС НА МАКСИМАЛЬНОЙ ВЫСОТЕ
 
+/*
+  // ОТПРАВКА СМС НА МАКСИМАЛЬНОЙ ВЫСОТЕ
+  if (millis() - timerP1 >= 60)
+  {
+    T1 = bmp.readTemperature();
+    for (int i=0; i<10; i++)
+    {
+    p = bmp.readPressure();
+    p1 = p1 + p;
+    }
+    timerP1 = millis();
+  }
+
+  if (millis() - timerP2 >= 80)
+  {
+    T2 = bmp.readTemperature();
+    for (int i=0; i<10; i++)
+    {
+    p = bmp.readPressure();
+    p2 = p2 + p;
+    }
+    timerP2 = millis();
+  }
+
+   if (millis() - timerP3 >= 100)
+  {
+    T3 = bmp.readTemperature();
+    for (int i=0; i<10; i++)
+    {
+    p = bmp.readPressure();
+    p3 = p3 + p;
+    }
+    timerP3 = millis();
+  }
+ 
+  
+  if (p2>p1 && p3>p2)
+  {
+     int P1 = p1/10;
+     float Hmax = log (P0/P1)*R*T1/mu/g;
+     splitFloat(Hmax, 2, intHmax, decHmax);   
+     flagHmax = true;
+  }
+    
+    
+*/
 
 
 
@@ -398,7 +482,7 @@ if (millis() - timeSendLastCoord >= 40000 && millis() - timerBuzzer >=  PeriodBu
   if (millis() - timeStopSD <= timeWorkBK && millis() - timeSD >= PeriodWriteSD)
   {
       // Если файла с таким именем не будет, ардуино создаст его.
-    File dataFile = SD.open("DATA_new3.csv", FILE_WRITE);
+    File dataFile = SD.open("DATA_last.csv", FILE_WRITE);
   
     accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
     splitFloat(bmp.readTemperature(), 1, intT, decT);
@@ -414,7 +498,7 @@ if (millis() - timeSendLastCoord >= 40000 && millis() - timerBuzzer >=  PeriodBu
       
     }
     else
-    {ntf(sd, "INVAILD \t INVAILD \t INVAILD \t%d\t%d\t%d\t%d\t%d\t%d\t%d%d.%d", ax, ay, az, gx, gy, gz, P, intT, decT);
+    {sprintf(sd, "INVAILD \t INVAILD \t INVAILD \t%d\t%d\t%d\t%d\t%d\t%d\t%d%d.%d", ax, ay, az, gx, gy, gz, P, intT, decT);
     }
      
     
